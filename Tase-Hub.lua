@@ -16,16 +16,17 @@ local LocalPlayer = Players.LocalPlayer
 local Aimbot = false
 local AimFOV = 150
 local ESP = false
+local Tracers = false
 local NameTags = false
 local SpeedValue = 16
 local InfJump = false
 local TeamCheck = false
-local RainbowFOV = false
 
 local BulletSpeed = 2500
 local Prediction = true
 
 local activeTags = {}
+local ESPObjects = {}
 
 local function GetTeamColor(player)
     if player.Team and player.Team.Name == "Police" then
@@ -35,133 +36,388 @@ local function GetTeamColor(player)
     elseif player.Team and player.Team.Name == "Criminal" then
         return Color3.fromRGB(255,0,0)
     end
+
     return Color3.fromRGB(255,255,255)
 end
 
+-- NAME TAGS
+
+local function RemoveNameTag(player)
+    local data = activeTags[player]
+
+    if data then
+        if data.gui then
+            data.gui:Destroy()
+        end
+
+        if data.humanoid and data.humanoid.Parent then
+            data.humanoid.DisplayDistanceType =
+                data.originalDisplayDistanceType
+        end
+
+        activeTags[player] = nil
+    end
+end
+
 local function CreateNameTag(player, character)
-    local head = character:WaitForChild("Head", 10)
-    local humanoid = character:WaitForChild("Humanoid", 10)
+    RemoveNameTag(player)
+
+    local head = character:WaitForChild("Head",10)
+    local humanoid = character:WaitForChild("Humanoid",10)
 
     if not head or not humanoid then return end
 
-    local old = head:FindFirstChild("CustomNameTag")
-    if old then old:Destroy() end
+    local originalDisplayDistanceType =
+        humanoid.DisplayDistanceType
+
+    humanoid.DisplayDistanceType =
+        Enum.HumanoidDisplayDistanceType.None
 
     local gui = Instance.new("BillboardGui")
     gui.Name = "CustomNameTag"
     gui.Adornee = head
-    gui.Size = UDim2.fromOffset(112, 32)
-    gui.StudsOffset = Vector3.new(0, 2.7, 0)
+    gui.Size = UDim2.fromOffset(110,29)
+    gui.StudsOffset = Vector3.new(0,2.6,0)
     gui.AlwaysOnTop = true
     gui.MaxDistance = 0
     gui.Parent = head
 
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.fromScale(1, 1)
-    frame.BackgroundColor3 = Color3.fromRGB(15, 17, 22)
-    frame.BackgroundTransparency = 0.1
+    frame.Size = UDim2.fromScale(1,1)
+    frame.BackgroundTransparency = 1
     frame.BorderSizePixel = 0
     frame.Parent = gui
 
-    local uiScale = Instance.new("UIScale")
-    uiScale.Scale = 1
-    uiScale.Parent = frame
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = frame
-
-    local stroke = Instance.new("UIStroke")
-    stroke.Thickness = 1
-    stroke.Color = GetTeamColor(player)
-    stroke.Parent = frame
-
-    local avatar = Instance.new("ImageLabel")
-    avatar.Size = UDim2.fromOffset(27, 27)
-    avatar.Position = UDim2.fromOffset(3, 2)
-    avatar.BackgroundTransparency = 1
-    avatar.Parent = frame
-
-    local avatarCorner = Instance.new("UICorner")
-    avatarCorner.CornerRadius = UDim.new(0, 5)
-    avatarCorner.Parent = avatar
-
-    task.spawn(function()
-        local success, image = pcall(function()
-            return Players:GetUserThumbnailAsync(
-                player.UserId,
-                Enum.ThumbnailType.HeadShot,
-                Enum.ThumbnailSize.Size100x100
-            )
-        end)
-
-        if success and avatar.Parent then
-            avatar.Image = image
-        end
-    end)
-
     local name = Instance.new("TextLabel")
-    name.Position = UDim2.fromOffset(35, 2)
-    name.Size = UDim2.new(1, -40, 0, 15)
+    name.Size = UDim2.new(1,-8,0,17)
+    name.Position = UDim2.fromOffset(4,1)
     name.BackgroundTransparency = 1
     name.Text = player.Name
-    name.TextColor3 = Color3.new(1, 1, 1)
-    name.TextSize = 10
+    name.TextColor3 = GetTeamColor(player)
+    name.TextSize = 12
     name.Font = Enum.Font.GothamBold
-    name.TextXAlignment = Enum.TextXAlignment.Left
+    name.TextXAlignment = Enum.TextXAlignment.Center
     name.TextTruncate = Enum.TextTruncate.AtEnd
+    name.TextStrokeTransparency = 0.65
     name.Parent = frame
 
     local hpBackground = Instance.new("Frame")
-    hpBackground.Position = UDim2.fromOffset(35, 21)
-    hpBackground.Size = UDim2.new(1, -40, 0, 6)
-    hpBackground.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+    hpBackground.Position = UDim2.fromOffset(4,21)
+    hpBackground.Size = UDim2.new(1,-8,0,4)
+    hpBackground.BackgroundColor3 = Color3.fromRGB(55,55,55)
     hpBackground.BorderSizePixel = 0
     hpBackground.ClipsDescendants = true
     hpBackground.Parent = frame
 
     local hpCorner = Instance.new("UICorner")
-    hpCorner.CornerRadius = UDim.new(1, 0)
+    hpCorner.CornerRadius = UDim.new(1,0)
     hpCorner.Parent = hpBackground
 
     local hpFill = Instance.new("Frame")
-    hpFill.Size = UDim2.fromScale(1, 1)
-    hpFill.BackgroundColor3 = Color3.fromRGB(50, 220, 100)
+    hpFill.Size = UDim2.fromScale(1,1)
+    hpFill.BackgroundColor3 = Color3.fromRGB(50,220,100)
     hpFill.BorderSizePixel = 0
     hpFill.Parent = hpBackground
 
     local fillCorner = Instance.new("UICorner")
-    fillCorner.CornerRadius = UDim.new(1, 0)
+    fillCorner.CornerRadius = UDim.new(1,0)
     fillCorner.Parent = hpFill
 
     local function Update()
+        if not humanoid.Parent then return end
+
         local percent = math.clamp(
-            humanoid.Health / math.max(humanoid.MaxHealth, 1),
-            0, 1
+            humanoid.Health / math.max(humanoid.MaxHealth,1),
+            0,1
         )
 
-        hpFill.Size = UDim2.fromScale(percent, 1)
-        stroke.Color = GetTeamColor(player)
+        name.TextColor3 = GetTeamColor(player)
+        hpFill.Size = UDim2.fromScale(percent,1)
 
         if percent <= 0.25 then
-            hpFill.BackgroundColor3 = Color3.fromRGB(240, 65, 65)
+            hpFill.BackgroundColor3 = Color3.fromRGB(240,65,65)
         elseif percent <= 0.5 then
-            hpFill.BackgroundColor3 = Color3.fromRGB(240, 190, 60)
+            hpFill.BackgroundColor3 = Color3.fromRGB(240,190,60)
         else
-            hpFill.BackgroundColor3 = Color3.fromRGB(50, 220, 100)
+            hpFill.BackgroundColor3 = Color3.fromRGB(50,220,100)
         end
     end
 
-    humanoid.HealthChanged:Connect(Update)
-    humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(Update)
-    Update()
+    local scale = Instance.new("UIScale")
+    scale.Scale = 1
+    scale.Parent = frame
 
     activeTags[player] = {
         gui = gui,
         head = head,
-        scale = uiScale
+        scale = scale,
+        humanoid = humanoid,
+        originalDisplayDistanceType = originalDisplayDistanceType,
+        update = Update
+    }
+
+    Update()
+end
+
+-- ESP DRAWINGS
+
+local function CreateESPObjects(player)
+    if ESPObjects[player] then return end
+
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = Color3.fromRGB(255,255,255)
+    box.Thickness = 1.5
+    box.Filled = false
+
+    local hpBackground = Drawing.new("Square")
+    hpBackground.Visible = false
+    hpBackground.Color = Color3.fromRGB(35,35,35)
+    hpBackground.Filled = true
+    hpBackground.Thickness = 0
+
+    local hpFill = Drawing.new("Square")
+    hpFill.Visible = false
+    hpFill.Color = Color3.fromRGB(50,220,100)
+    hpFill.Filled = true
+    hpFill.Thickness = 0
+
+    local tracer = Drawing.new("Line")
+    tracer.Visible = false
+    tracer.Color = Color3.fromRGB(255,255,255)
+    tracer.Thickness = 1
+
+    ESPObjects[player] = {
+        box = box,
+        hpBackground = hpBackground,
+        hpFill = hpFill,
+        tracer = tracer
     }
 end
+
+local function HideESP(player)
+    local data = ESPObjects[player]
+    if not data then return end
+
+    data.box.Visible = false
+    data.hpBackground.Visible = false
+    data.hpFill.Visible = false
+    data.tracer.Visible = false
+end
+
+local function RemoveESP(player)
+    local data = ESPObjects[player]
+    if not data then return end
+
+    for _,drawing in pairs(data) do
+        drawing:Remove()
+    end
+
+    ESPObjects[player] = nil
+end
+
+-- ESP BOX POSITION
+
+local function GetScreenBounds(character)
+    local success,cf,size = pcall(function()
+        return character:GetBoundingBox()
+    end)
+
+    if not success then return nil end
+
+    local minX = math.huge
+    local minY = math.huge
+    local maxX = -math.huge
+    local maxY = -math.huge
+    local visibleCorners = 0
+
+    for x = -1,1,2 do
+        for y = -1,1,2 do
+            for z = -1,1,2 do
+                local offset = Vector3.new(
+                    size.X*x/2,
+                    size.Y*y/2,
+                    size.Z*z/2
+                )
+
+                local worldPosition = cf:PointToWorldSpace(offset)
+                local screenPosition =
+                    Camera:WorldToViewportPoint(worldPosition)
+
+                if screenPosition.Z > 0 then
+                    visibleCorners += 1
+
+                    minX = math.min(minX,screenPosition.X)
+                    minY = math.min(minY,screenPosition.Y)
+                    maxX = math.max(maxX,screenPosition.X)
+                    maxY = math.max(maxY,screenPosition.Y)
+                end
+            end
+        end
+    end
+
+    if visibleCorners == 0 then return nil end
+
+    local width = maxX-minX
+    local height = maxY-minY
+
+    if width < 2 or height < 2 then return nil end
+
+    local viewport = Camera.ViewportSize
+
+    if maxX < 0 or minX > viewport.X
+    or maxY < 0 or minY > viewport.Y then
+        return nil
+    end
+
+    return minX,minY,width,height
+end
+
+-- TRACER POSITION
+
+local function GetTracerPoint(position)
+    local viewport = Camera.ViewportSize
+    local center = Vector2.new(
+        viewport.X/2,
+        viewport.Y/2
+    )
+
+    local projected = Camera:WorldToViewportPoint(position)
+
+    local point = Vector2.new(
+        projected.X,
+        projected.Y
+    )
+
+    if projected.Z <= 0 then
+        point = center-(point-center)
+    end
+
+    if projected.Z > 0
+    and point.X >= 0 and point.X <= viewport.X
+    and point.Y >= 0 and point.Y <= viewport.Y then
+        return point
+    end
+
+    local direction = point-center
+
+    if direction.Magnitude < 0.001 then
+        direction = Vector2.new(0,1)
+    end
+
+    local margin = 8
+    local scaleX = math.huge
+    local scaleY = math.huge
+
+    if direction.X > 0 then
+        scaleX = (viewport.X-margin-center.X)/direction.X
+    elseif direction.X < 0 then
+        scaleX = (margin-center.X)/direction.X
+    end
+
+    if direction.Y > 0 then
+        scaleY = (viewport.Y-margin-center.Y)/direction.Y
+    elseif direction.Y < 0 then
+        scaleY = (margin-center.Y)/direction.Y
+    end
+
+    local scale = math.min(scaleX,scaleY)
+
+    return center+direction*scale
+end
+
+-- UPDATE ESP
+
+local function UpdateESP(player)
+    if player == LocalPlayer then return end
+
+    CreateESPObjects(player)
+
+    local data = ESPObjects[player]
+    local character = player.Character
+
+    local humanoid = character and
+        character:FindFirstChildOfClass("Humanoid")
+
+    if not character or not humanoid or humanoid.Health <= 0 then
+        HideESP(player)
+        return
+    end
+
+    -- TRACERS
+
+    local target = character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChild("Head")
+
+    if Tracers and target then
+        local point = GetTracerPoint(target.Position)
+
+        data.tracer.Visible = true
+
+        data.tracer.From = Vector2.new(
+            Camera.ViewportSize.X/2,
+            Camera.ViewportSize.Y
+        )
+
+        data.tracer.To = point
+    else
+        data.tracer.Visible = false
+    end
+
+    -- ESP BOX
+
+    if not ESP then
+        data.box.Visible = false
+        data.hpBackground.Visible = false
+        data.hpFill.Visible = false
+        return
+    end
+
+    local x,y,width,height = GetScreenBounds(character)
+
+    if not x then
+        data.box.Visible = false
+        data.hpBackground.Visible = false
+        data.hpFill.Visible = false
+        return
+    end
+
+    local percent = math.clamp(
+        humanoid.Health/math.max(humanoid.MaxHealth,1),
+        0,1
+    )
+
+    data.box.Visible = true
+    data.box.Position = Vector2.new(x,y)
+    data.box.Size = Vector2.new(width,height)
+
+    -- HP LEFT
+
+    data.hpBackground.Visible = true
+    data.hpBackground.Position = Vector2.new(x-6,y)
+    data.hpBackground.Size = Vector2.new(3,height)
+
+    data.hpFill.Visible = true
+    data.hpFill.Position = Vector2.new(
+        x-6,
+        y+height*(1-percent)
+    )
+
+    data.hpFill.Size = Vector2.new(
+        3,
+        height*percent
+    )
+
+    if percent <= 0.25 then
+        data.hpFill.Color = Color3.fromRGB(240,65,65)
+    elseif percent <= 0.5 then
+        data.hpFill.Color = Color3.fromRGB(240,190,60)
+    else
+        data.hpFill.Color = Color3.fromRGB(50,220,100)
+    end
+end
+
+-- FOV
 
 local Circle = Drawing.new("Circle")
 Circle.Visible = false
@@ -169,6 +425,8 @@ Circle.Thickness = 2
 Circle.Radius = AimFOV
 Circle.Color = Color3.fromRGB(255,255,255)
 Circle.Filled = false
+
+-- TABS
 
 local CombatTab = Window:CreateTab("Combat")
 local MoveTab = Window:CreateTab("Movement")
@@ -228,18 +486,24 @@ VisualTab:CreateToggle({
 })
 
 VisualTab:CreateToggle({
-    Name = "Name Tags",
+    Name = "Tracers",
     CurrentValue = false,
     Callback = function(v)
-        NameTags = v
+        Tracers = v
     end
 })
 
 VisualTab:CreateToggle({
-    Name = "Rainbow FOV",
+    Name = "Name Tags",
     CurrentValue = false,
     Callback = function(v)
-        RainbowFOV = v
+        NameTags = v
+
+        if not v then
+            for player in pairs(activeTags) do
+                RemoveNameTag(player)
+            end
+        end
     end
 })
 
@@ -255,15 +519,17 @@ VisualTab:CreateButton({
     end
 })
 
-local function WallCheck(position, character)
+-- WALL CHECK
+
+local function WallCheck(position,character)
     local origin = Camera.CFrame.Position
-    local direction = position - origin
+    local direction = position-origin
 
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {LocalPlayer.Character}
 
-    local ray = workspace:Raycast(origin, direction, params)
+    local ray = workspace:Raycast(origin,direction,params)
 
     if ray then
         return ray.Instance:IsDescendantOf(character)
@@ -272,25 +538,38 @@ local function WallCheck(position, character)
     return true
 end
 
+-- SPEED
+
 RunService.RenderStepped:Connect(function()
     local character = LocalPlayer.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local humanoid = character and
+        character:FindFirstChildOfClass("Humanoid")
 
     if humanoid then
         humanoid.WalkSpeed = SpeedValue
     end
 end)
 
+-- INFINITE JUMP
+
 UIS.JumpRequest:Connect(function()
     local character = LocalPlayer.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    local humanoid = character and
+        character:FindFirstChildOfClass("Humanoid")
 
     if InfJump and humanoid then
-        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        humanoid:ChangeState(
+            Enum.HumanoidStateType.Jumping
+        )
     end
 end)
 
+-- AIMBOT AND FOV
+
 RunService.RenderStepped:Connect(function()
+    Camera = workspace.CurrentCamera
+    if not Camera then return end
+
     local screenCenter = Vector2.new(
         Camera.ViewportSize.X/2,
         Camera.ViewportSize.Y/2
@@ -298,10 +577,7 @@ RunService.RenderStepped:Connect(function()
 
     Circle.Position = screenCenter
     Circle.Radius = AimFOV
-
-    if RainbowFOV then
-        Circle.Color = Color3.fromHSV(tick()%5/5,1,1)
-    end
+    Circle.Color = Color3.fromRGB(255,255,255)
 
     if not Aimbot then return end
 
@@ -321,11 +597,13 @@ RunService.RenderStepped:Connect(function()
             end
 
             local head = player.Character.Head
-            local pos, visible = Camera:WorldToViewportPoint(head.Position)
 
-            if visible and WallCheck(head.Position, player.Character) then
+            local pos,visible =
+                Camera:WorldToViewportPoint(head.Position)
+
+            if visible and WallCheck(head.Position,player.Character) then
                 local distance = (
-                    Vector2.new(pos.X,pos.Y) - screenCenter
+                    Vector2.new(pos.X,pos.Y)-screenCenter
                 ).Magnitude
 
                 if distance < shortestDistance then
@@ -341,12 +619,13 @@ RunService.RenderStepped:Connect(function()
 
         if Prediction then
             local velocity = closestPart.AssemblyLinearVelocity
+
             local distance = (
-                Camera.CFrame.Position - closestPart.Position
+                Camera.CFrame.Position-closestPart.Position
             ).Magnitude
 
-            local time = distance / BulletSpeed
-            aimPosition = closestPart.Position + (velocity * time)
+            local time = distance/BulletSpeed
+            aimPosition = closestPart.Position+(velocity*time)
         end
 
         Camera.CFrame = CFrame.new(
@@ -356,64 +635,77 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-RunService.RenderStepped:Connect(function()
-    for _,p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            local color = GetTeamColor(p)
-            local h = p.Character:FindFirstChild("ZenithESP")
+-- VISUALS UPDATE
 
-            if ESP then
-                if not h then
-                    local highlight = Instance.new("Highlight")
-                    highlight.Name = "ZenithESP"
-                    highlight.FillColor = color
-                    highlight.Parent = p.Character
-                else
-                    h.FillColor = color
-                end
-            elseif h then
-                h:Destroy()
+RunService.RenderStepped:Connect(function()
+    Camera = workspace.CurrentCamera
+    if not Camera then return end
+
+    for _,player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+
+            -- ESP AND TRACERS
+
+            if ESP or Tracers then
+                UpdateESP(player)
+            elseif ESPObjects[player] then
+                HideESP(player)
             end
 
-            local tagData = activeTags[p]
-            local head = p.Character:FindFirstChild("Head")
+            -- NAME TAGS
+
+            local character = player.Character
+            local head = character and
+                character:FindFirstChild("Head")
+
+            local tagData = activeTags[player]
 
             if NameTags and head then
-                if not tagData or not tagData.gui.Parent or tagData.head ~= head then
-                    if tagData and tagData.gui then
-                        tagData.gui:Destroy()
-                    end
+                if not tagData
+                or not tagData.gui.Parent
+                or tagData.head ~= head then
 
-                    CreateNameTag(p, p.Character)
+                    CreateNameTag(player,character)
                 end
+
             elseif tagData then
-                if tagData.gui then
-                    tagData.gui:Destroy()
-                end
-                activeTags[p] = nil
+                RemoveNameTag(player)
             end
         end
     end
 end)
 
-RunService.RenderStepped:Connect(function()
-    local camera = workspace.CurrentCamera
-    if not camera then return end
+-- NAME TAG SCALE AND HP
 
-    for player, data in pairs(activeTags) do
+RunService.RenderStepped:Connect(function()
+    Camera = workspace.CurrentCamera
+    if not Camera then return end
+
+    for player,data in pairs(activeTags) do
         if data.gui.Parent and data.head.Parent then
+
+            data.update()
+
             local distance = (
-                camera.CFrame.Position - data.head.Position
+                Camera.CFrame.Position-data.head.Position
             ).Magnitude
 
             local alpha = math.clamp(
-                (distance - 15) / 145,
-                0, 1
+                (distance-15)/145,
+                0,1
             )
 
-            data.scale.Scale = 0.85 + ((1 - alpha) * 0.3)
+            data.scale.Scale =
+                0.85+((1-alpha)*0.3)
         else
-            activeTags[player] = nil
+            RemoveNameTag(player)
         end
     end
+end)
+
+-- CLEANUP
+
+Players.PlayerRemoving:Connect(function(player)
+    RemoveNameTag(player)
+    RemoveESP(player)
 end)
